@@ -1,4 +1,4 @@
-module github.com/coolgreenhat/vectra_db
+module vectraDB
 
 go 1.24.7
 

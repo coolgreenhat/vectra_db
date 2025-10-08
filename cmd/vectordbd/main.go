@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/coolgreenhat/vectra_db/pkg/api"
-	"github.com/coolgreenhat/vectra_db/pkg/store"
+	"vectraDB/pkg/api"
+	"vectraDB/pkg/store"
 )
 
 var version = "v0.1.0"
