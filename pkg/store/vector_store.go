@@ -1,29 +1,21 @@
 package store
 
 import (
+	"fmt"
+	"sort"
 	"encoding/json"
 	"go.etcd.io/bbolt"
 	"log"
+	"errors"
 )
 
 const vectorBucket = "vectors"
 
-func (s *VectorStore) Upsert(v Vector) error {
+func (s *VectorStore) Insert(v Vector) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Remove old vector from Index
-	if old, ok := s.vectors[v.ID]; ok {
-		s.removeFromIndex(old)
-	}
-	
-	// Save to BoltDB
-	err := s.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(bucketVectors))
-		data, _ := json.Marshal(v)
-		return b.Put([]byte(v.ID), data)
-	})
-
+	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
@@ -31,8 +23,22 @@ func (s *VectorStore) Upsert(v Vector) error {
 	s.vectors[v.ID] = v
 	s.addToIndex(v)
 
-	return nil
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(vectorsBucket)
+		return b.Put([]byte(v.ID), data)
+	})
+}
 
+func (s *VectorStore) Get(id string) (Vector, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	v, ok := s.vectors[id]
+	if !ok {
+		return Vector{}, errors.New("vector not found")
+	}
+
+	return v, nil
 }
 
 // Remove a vector from store and DB
@@ -40,17 +46,57 @@ func (s *VectorStore) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	v, ok := s.vectors[id]
+	vec, ok := s.vectors[id]
 	if !ok {
 		return nil
 	}
 
-	s.removeFromIndex(v)
+	for key, val := range vec.Metadata {
+		valStr := fmt.Sprintf("%v", val)
+		delete(s.index[key][valStr], id)
+		if len(s.index[key][valStr]) == 0 {
+			delete(s.index[key], valStr)
+		}
+	}
+
 	delete(s.vectors, id)
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(bucketVectors))
+		b := tx.Bucket(vectorsBucket)
 		return b.Delete([]byte(id))
+	})
+}
+
+func (s *VectorStore) UpdateVector(id string, newVec Vector) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	oldVec, exists := s.vectors[id]
+	if exists {
+		for key, val := range oldVec.Metadata {
+			valStr := fmt.Sprintf("%v", val)
+			if s.index[key] != nil && s.index[key][valStr] != nil {
+				delete(s.index[key][valStr], id)
+				if len(s.index[key][valStr]) == 0 {
+					delete(s.index[key], valStr)
+				}
+			}
+		}
+	}
+
+	s.vectors[id] = newVec
+	s.addToIndex(newVec)
+
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(vectorsBucket)
+		if err != nil {
+			return err
+		}
+		data, err := json.Marshal(newVec)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(id), data)
 	})
 }
 
@@ -92,6 +138,7 @@ func (s *VectorStore) FilterVectors(filters map[string]string) []Vector {
 	}
 
 	var candidateIDs map[string]bool
+
 	for key, val := range filters {
 		valueMap, ok := s.index[key]
 		if !ok {
@@ -104,7 +151,7 @@ func (s *VectorStore) FilterVectors(filters map[string]string) []Vector {
 		}
 
 		if candidateIDs == nil {
-			candidateIDs = make(map[string]bool)
+			candidateIDs = make(map[string]bool, len(idSet))
 			for id := range idSet {
 				candidateIDs[id] = true
 			}
@@ -115,12 +162,19 @@ func (s *VectorStore) FilterVectors(filters map[string]string) []Vector {
 				}
 			}
 		}
+
+		if len(candidateIDs) == 0 {
+			return nil
+		}
 	}
 
-	results := []Vectors{}
-	for id: = range candidateIDs {
-		results = append(results, s.vectors[id])
+	results := make([]Vector, 0, len(candidateIDs))
+	for id := range candidateIDs {
+		if v, ok := s.vectors[id]; ok {
+			results = append(results, v)
+		}
 	}
+
 	return results
 }
 
@@ -129,34 +183,82 @@ func (s *VectorStore) Close() {
 	s.db.Close()
 }
 
+// Search
 func (s *VectorStore) Search(params SearchParams) ([]SearchResult, int) {
-	filtered := s.FilterVectors(params.Filter)
-	results := []SearchResult{}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
+	//Filter
+	filtered := s.FilterVectors(params.Filter)
+
+	// Compute Scores
+	results := make([]SearchResult, 0, len(filtered))
 	for _, v := range filtered {
 		score, err := CosineSimilarity(params.Query, v.Vector)
 		if err != nil {
-			log.Printf("Skipping Vector %s due to error : %v", v.ID, err)
+			log.Printf("Skipping %s: %v", v.ID, err)
 			continue
 		}
-		results = append(results, SearchResult{Vector: v, Score: score})
+		results = append(results, SearchResult{
+			Vector: v, 
+			Score: score,
+		})
 	}
 
 	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].score
-	}
+		return results[i].Score > results[j].Score
+	})
 
 	total := len(results)
-	start := (params.Page - 1) * params.Limit
-	end := start + params.Limit
 
-	if start > total {
-		start = total
+	if params.Limit <= 0 {
+		params.Limit = 10
+	}
+	if params.Page <=0 {
+		params.Page = 1
 	}
 
+	start := (params.Page - 1) * params.Limit
+	if start >= total {
+		return []SearchResult{}, total
+	}
+
+	end := start + params.Limit
 	if end > total {
-			end = total
+		end = total
 	}
 
 	return results[start:end], total
+}
+
+// remove a vector by ID
+func (s *VectorStore) DeleteVector(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	vec, exists := s.vectors[id]
+	if !exists {
+		return fmt.Errorf("Vector %s not found", id)
+	}
+
+	// Remove from index
+	for key, val := range vec.Metadata {
+		valStr := fmt.Sprintf("%v", val)
+		delete(s.index[key][valStr], id)
+		if len(s.index[key][valStr]) == 0 {
+			delete(s.index[key], valStr)
+		}
+	}
+
+	// Remove from memory
+	delete(s.vectors, id)
+
+	// remove from DB
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("vectors"))
+		if b == nil {
+			return fmt.Errorf("bucket not found")
+		}
+		return b.Delete([]byte(id))
+	})
 }

@@ -2,7 +2,7 @@ package api
 
 import (
   "encoding/json"
-	// "math"
+	"fmt"
   "net/http"
 
   "github.com/go-chi/chi/v5"
@@ -26,8 +26,6 @@ type searchResponse struct {
 	Results 		[]responseItem `json:"results"`
 }
 
-
-
 func NewAPI(store *store.VectorStore) *API {
 	return &API{Store: store}
 }
@@ -37,6 +35,7 @@ func (api *API) Routes() *chi.Mux {
 
 	r.Post("/vectors", api.InsertVector)
 	r.Get("/vectors/{id}", api.GetVector)
+	r.Put("/vectors/{id}", api.UpdateVector)
 	r.Delete("/vectors/{id}", api.DeleteVector)
 	r.Post("/search", api.SearchVectors)
 	return r
@@ -49,11 +48,21 @@ func (api *API) InsertVector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.Store.Insert(v)
+	if v.ID == "" {
+		http.Error(w, "missing vector ID", http.StatusBadRequest)
+		return
+	}
+	
+	if err := api.Store.Insert(v); err != nil {
+		http.Error(w, fmt.Sprintf("failed to insert vector: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(v) // Optionally return inserted Vector
 }
 
+// Retrieves a vector by its ID
 func (api *API) GetVector(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	v, err := api.Store.Get(id)
@@ -62,18 +71,41 @@ func (api *API) GetVector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type","application/json")
 	json.NewEncoder(w).Encode(v)
 }
 
+
+func (api *API) UpdateVector(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var v store.Vector
+
+	if err := json.NewDecoder(r.Body).Decode(&v); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	v.ID = id //ensure consistency
+	if err := api.Store.UpdateVector(id, v); err != nil {
+		http.Error(w, fmt.Sprintf("failed to update: %v", err),http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+// deletes a vector by ID
 func (api *API) DeleteVector(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := api.Store.Delete(id); err != nil {
+	if err := api.Store.DeleteVector(id); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// sets resonable defaults for search queries
 func (req *SearchRequest) SetDefaults() {
 	if req.TopK <=0 {
 		req.TopK = 5
@@ -88,6 +120,7 @@ func (req *SearchRequest) SetDefaults() {
 	}
 }
 
+// Handles search queries
 func (api *API) SearchVectors(w http.ResponseWriter, r *http.Request) {
 	var req SearchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -2,6 +2,8 @@ package store
 
 import (
 	"sync"
+
+	"go.etcd.io/bbolt"
 )
 
 type Vector struct {

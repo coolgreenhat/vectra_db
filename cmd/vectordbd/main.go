@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"log"
 
 	"github.com/go-chi/chi/v5"
 	"vectraDB/pkg/api"
@@ -13,7 +14,13 @@ import (
 var version = "v0.1.0"
 
 func main() {
-	vs := store.NewVectorStore()
+	dbPath := "vectra.db"
+	vs, err := store.NewVectorStore(dbPath)
+	
+	if err != nil {
+		log.Fatalf("Failed to initialize vector store: %v")
+	}
+
 	apiServer := api.NewAPI(vs)
 
 	r := chi.NewRouter()
@@ -25,5 +32,5 @@ func main() {
 	}
 
 	fmt.Printf("Vectra DB running on port %s\n", port)
-	http.ListenAndServe(":"+port,r)
+	log.Fatal(http.ListenAndServe(":"+port,r))
 }
