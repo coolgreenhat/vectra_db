@@ -14,16 +14,16 @@ type API struct {
 }
 
 type responseItem struct {
-	ID 				string									`json:"id"`
-	Score 			float64 								`json:"score"`
-	Metadata 		map[string]interface{} 					`json:"metadata,omitempty"`
+	ID 		string			`json:"id"`
+	Score 		float64 		`json:"score"`
+	Metadata 	map[string]interface{} 	`json:"metadata,omitempty"`
 }
 
 type searchResponse struct {
-	Total 			int 					 `json:"total"` 
-	Page 				int						 `json:"page"`
-	Limit 			int 					 `json:"limit"`
-	Results 		[]responseItem `json:"results"`
+	Total 		int 				`json:"total"` 
+	Page 		int				`json:"page"`
+	Limit 		int 				`json:"limit"`
+	Results 	[]responseItem 			`json:"results"`
 }
 
 func NewAPI(store *store.VectorStore) *API {
