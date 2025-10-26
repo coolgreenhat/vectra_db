@@ -1,34 +1,90 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
 # Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+bin/
+dist/
 
 # Test binary, built with `go test -c`
 *.test
 
-# Code coverage profiles and other test artifacts
+# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
-coverage.*
-*.coverprofile
-profile.cov
+coverage.html
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
 # Go workspace file
 go.work
-go.work.sum
 
-# env file
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Database files
+*.db
+*.db.backup.*
+
+# Log files
+*.log
+logs/
+
+# Environment files
 .env
+.env.local
+.env.production
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# Docker
+.dockerignore
 
-bin/
+# Air (live reload)
+tmp/
+
+# Build artifacts
+build/
+target/
+
+# Temporary files
+tmp/
+temp/
+
+# Node modules (if any)
+node_modules/
+
+# Python cache (if any)
+__pycache__/
+*.pyc
+*.pyo
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Test coverage
+coverage.out
+coverage.html
+
+# Profiling
+*.prof
+*.pprof
+
+# Air configuration
+.air.toml
+
+vectordbd
